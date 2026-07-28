@@ -19,3 +19,40 @@
 ### My conclusion
 
 I would choose Solution B for production. It is easier to scale because it only loops through the records once and uses sets for fast lookups. Solution A is simple to understand, but the nested loops make it a poor choice for large daily sales records.
+
+## My Analysis — After AI Interrogation
+
+### What the AI got right
+
+- It correctly identified `n` as the number of product IDs in `records`.
+- It explained that Solution A compares pairs of records with nested loops, while Solution B makes one pass through the input.
+- It correctly described average set lookup and insertion as O(1), giving Solution B an average time complexity of O(n).
+- It correctly identified the speed-versus-memory tradeoff: Solution B uses O(n) auxiliary space to avoid repeated scans.
+
+### What the AI missed or got wrong
+
+The initial analysis described Solution A as O(n²) because of its nested loops, but that did not fully account for `records[i] not in duplicates`. Membership testing in a list is O(d), where `d` is the number of distinct duplicates already collected. Because that lookup occurs inside the pair-comparison loops, a loose worst-case upper bound is O(n³). The tight cost depends on how duplicate values are distributed: inputs with few distinct duplicates can behave closer to O(n²), while inputs that make the duplicates list large add substantial membership-scan work. The challenge prompt made this assumption and distinction explicit.
+
+### What the benchmark confirmed
+
+- Solution A time at n=10,000: 1.280584 seconds
+- Solution B time at n=10,000: 0.000358 seconds
+- Ratio: Solution B was approximately 3,572.1 times faster than Solution A.
+
+The benchmark used 10,000 records with 8,000 unique IDs and 2,000 repeated IDs. It used the fastest of three one-run `timeit` measurements for each function. Exact timings will vary by computer, but the size of the difference confirms that Solution B scales much better for this workload.
+
+### What I learned
+
+Reading only the visible loop structure can miss important work performed inside a loop. Challenging the first complexity answer and then measuring both implementations showed why theoretical analysis and a controlled benchmark are strongest when used together.
+
+### My final recommendation
+
+Solution B should go into production because its average O(n) processing time is appropriate for large daily inputs, while Solution A performs pairwise comparisons and repeated list scans. I would tell the previous developer that Solution A is correct and readable for small inputs, but its data structures make it unsuitable at production scale; replacing the duplicates list with set-based tracking removes the bottleneck.
+
+## Reflection
+
+The challenge prompt produced the most useful AI response because it focused attention on an operation hidden inside the nested loops. That showed me that effective AI use involves probing a specific claim and asking what assumptions support it, rather than accepting the first polished explanation.
+
+If Solution A processed 10,000 records a day without a visible problem, the argument for keeping it would be that a working replacement always carries some regression and deployment risk. The argument for replacing it is stronger: the benchmark already shows avoidable cost at that size, future growth could make the delay visible, and Solution B is short enough to test thoroughly. I would replace it behind equivalence tests and monitor the rollout instead of waiting for an incident.
+
+In the next AI Lab, I would write down edge cases and the exact evidence needed to accept an AI claim before prompting. I would also ask for a reproducible test earlier so theoretical statements can be checked throughout the conversation.
