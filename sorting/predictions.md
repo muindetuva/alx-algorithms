@@ -50,3 +50,146 @@ This is tricky because equal elements can affect partitioning. Timsort should st
 I think Dataset C, sorted descending, will show the largest performance gap between the fastest and slowest algorithm.
 
 My reason is that Timsort can detect ordered runs and may handle descending data efficiently, while bubble sort and insertion sort face close to their worst-case behavior because many elements need to move a long distance. That should create a very large gap between the best adaptive algorithm and the slowest quadratic algorithm.
+
+## AI Predictions vs Mine — Before Benchmarking
+
+### Where we agreed
+
+We both expected Timsort to win every dataset because it is implemented in
+optimized C and adapts to existing runs. We also placed Bubble and Insertion
+near the bottom for random and reverse-sorted data, and expected Merge to be
+predictably competitive without adapting much to input order.
+
+### Where we disagreed
+
+The AI placed early-exit Bubble ahead of Merge and Quicksort on the already
+sorted dataset because Bubble needs only one linear pass. My ranking left
+Bubble last despite explicitly noting the optimization. The AI also expected
+a three-way Quicksort to handle high duplicates better than Merge, while my
+initial ranking put Merge ahead without conditioning the prediction on the
+partition strategy.
+
+### AI reasoning that was better than mine
+
+It separated algorithmic complexity from implementation details. In
+particular, it noted that Python's built-in sort runs in C while all custom
+implementations run in Python, and that Quicksort's duplicate performance
+depends on whether equal values form their own partition.
+
+### My reasoning that the AI missed or glossed over
+
+The AI treated random-pivot Quicksort as if random pivot selection guaranteed
+consistent timings. Pivot choice still introduces run-to-run variance, and
+recursive list construction adds allocation costs that Big O notation does
+not show.
+
+## Actual Benchmark Results
+
+All datasets contained 10,000 values. Bubble and Insertion were measured once
+per dataset because of their quadratic cost; Merge, Quicksort, and Timsort use
+the median of three `timeit` runs.
+
+### Dataset A — Random
+
+| Algorithm | Time (s) | Rank |
+|---|---:|---:|
+| Bubble | 3.187942 | 5 |
+| Insertion | 1.389208 | 4 |
+| Merge | 0.015890 | 3 |
+| Quicksort | 0.008768 | 2 |
+| Timsort | 0.000598 | 1 |
+
+### Dataset B — Already Sorted Ascending
+
+| Algorithm | Time (s) | Rank |
+|---|---:|---:|
+| Bubble | 0.000357 | 2 |
+| Insertion | 0.000668 | 3 |
+| Merge | 0.010033 | 5 |
+| Quicksort | 0.008171 | 4 |
+| Timsort | 0.000025 | 1 |
+
+### Dataset C — Sorted Descending
+
+| Algorithm | Time (s) | Rank |
+|---|---:|---:|
+| Bubble | 4.278350 | 5 |
+| Insertion | 2.833887 | 4 |
+| Merge | 0.010622 | 3 |
+| Quicksort | 0.008967 | 2 |
+| Timsort | 0.000029 | 1 |
+
+### Dataset D — Nearly Sorted
+
+| Algorithm | Time (s) | Rank |
+|---|---:|---:|
+| Bubble | 1.834949 | 5 |
+| Insertion | 0.037608 | 4 |
+| Merge | 0.012853 | 3 |
+| Quicksort | 0.008166 | 2 |
+| Timsort | 0.000074 | 1 |
+
+### Dataset E — High Duplicates
+
+| Algorithm | Time (s) | Rank |
+|---|---:|---:|
+| Bubble | 2.100595 | 5 |
+| Insertion | 0.252483 | 4 |
+| Merge | 0.015096 | 3 |
+| Quicksort | 0.000727 | 2 |
+| Timsort | 0.000188 | 1 |
+
+### Largest performance gap observed
+
+Dataset C had the largest gap. Bubble took 4.278350 seconds while Timsort took
+0.000029 seconds, an approximate 147,529× difference based on the displayed
+timings.
+
+## Interrogating the Surprise
+
+### What surprised me most
+
+Bubble was second-fastest on Dataset B despite ranking last on every other
+dataset. It even beat Insertion, Merge, and randomized Quicksort on that one
+input shape.
+
+### The AI's explanation of why
+
+Early-exit Bubble performs one pass over a sorted list, observes no swaps, and
+stops. That changes its sorted-input behavior from quadratic to O(n). Merge
+and Quicksort still recursively partition and combine the entire list, while
+Insertion also has an O(n) best case but performs more Python-level loop work
+per item in this implementation.
+
+### My assessment: was the explanation correct, complete, or missing something?
+
+The explanation was correct and mostly complete. It identified Bubble's best
+case and the non-adaptive work of the divide-and-conquer implementations. The
+important additional detail is that Timsort runs in optimized C, so equal Big
+O best cases do not imply equal elapsed time for these Python functions.
+
+### What this reveals about that algorithm's behaviour
+
+Bubble's poor general reputation does not erase its linear best case when an
+early-exit flag is present. That narrow advantage disappears as soon as a few
+far-apart elements force repeated passes, as Dataset D demonstrates.
+
+## Reflection
+
+My Dataset A ranking matched the actual order exactly. Dataset B was my worst
+prediction because I placed Bubble last even after noting its early-exit
+optimization; it actually ranked second. My mental model of asymptotic cases
+was sound, but I did not consistently translate implementation details into a
+complete ranking.
+
+On Dataset E, three-way Quicksort was far faster than I predicted and beat
+Merge by more than 20×. Its equal partition collects the 9,000 repeated values
+without recursively sorting them, while Merge still performs its full merge
+structure. Insertion and Bubble make fewer movements when values compare
+equal, but shuffled outliers still cause substantial quadratic-style work.
+
+Forming a hypothesis produced the most value in this sorting lab because the
+rankings were precise and directly falsifiable across five controlled input
+shapes. The measurements exposed exactly where I understood an algorithm's
+case analysis but failed to account for early exit, three-way partitioning,
+language overhead, or adaptive behavior.
