@@ -46,3 +46,125 @@ I would compare the largest bucket size, smallest bucket size, number of empty b
 If I give AI a set of keys and ask for a simple hash function, I expect the biggest weakness will be poor mixing.
 
 The AI may suggest a function that adds character codes or multiplies by a small constant, but it may not test whether similar keys spread across buckets evenly. I also expect it may focus on making the function easy to understand instead of making it resistant to crafted collision inputs.
+
+## AI's Hash Function
+
+### The function
+
+The AI proposed a polynomial rolling hash. Starting at zero, it processes every
+character from left to right, multiplies the current value by 31, adds the
+character's Unicode code point, and reduces the result modulo the bucket count:
+
+```python
+def custom_hash(key, num_buckets):
+    hash_value = 0
+    for character in key:
+        hash_value = (hash_value * 31 + ord(character)) % num_buckets
+    return hash_value
+```
+
+### AI's claimed strengths
+
+- It is deterministic and always returns an index in the valid bucket range.
+- It uses every character and its position instead of relying only on length
+  or one end of the key.
+- Multiplication makes character order matter, so common anagrams do not
+  automatically collide.
+- It runs in O(k) time for a key containing k characters and uses O(1) extra
+  space.
+
+### AI's claimed weaknesses
+
+- It is not cryptographic and should not be used against hostile input without
+  additional protection.
+- Distribution depends on how multiplier 31 interacts with `num_buckets`.
+- Because the function is deterministic and unseeded, an attacker who knows
+  it can search for or construct collisions.
+
+### My initial assessment
+
+The design is more credible than a character-code sum because it uses order
+and every character. My main concern is reducing modulo the bucket count after
+every step. For a power-of-two bucket count, only low-order behavior matters,
+and multiplier 31 has a particularly simple relationship with 16.
+
+## Distribution Test Results
+
+| Test | Max chain | Empty buckets | Std deviation | Assessment |
+|---|---:|---:|---:|---|
+| Random-looking keys | 3 | 5 | 1.031 | Reasonably spread for 20 keys |
+| Sequential numeric strings | 10 | 0 | 2.016 | Uneven, with visible clustering |
+| Common English words | 4 | 0 | 1.059 | All buckets used; moderate spread |
+| Similar strings | 5 | 2 | 1.833 | Prefix pattern harms distribution |
+| Single ASCII characters | 6 | 0 | 0.242 | Most uniform normal test |
+
+### Which test produced the worst distribution and why?
+
+Among the five ordinary datasets, sequential numeric strings were worst: the
+maximum chain was 10 and standard deviation was 2.016. Decimal strings have
+similar structure and limited character values, so the base-31 recurrence
+does not mix their low bits evenly before reduction to 16 buckets.
+
+### Did any result surprise me?
+
+Single-character inputs were the most uniform even though they perform almost
+no mixing. Their consecutive ASCII values cycle evenly through 16 buckets,
+giving a standard deviation of only 0.242. This is a reminder that a favorable
+dataset can hide structural weaknesses in a hash function.
+
+### Does the actual performance match the AI's claimed strengths?
+
+Partly. The function is deterministic, fast, position-sensitive, and usable
+on all tested strings. However, the sequential and common-prefix results show
+that processing every character does not guarantee uniform distribution,
+especially when the bucket count interacts poorly with the multiplier.
+
+## Adversarial Collision Analysis
+
+With 16 buckets, `31 mod 16` is `15`, which is equivalent to `-1`. For a
+two-character key, the result is therefore the second character code minus the
+first character code, modulo 16. Repeated-character pairs have a difference of
+zero, so these ten distinct keys all land in bucket 0:
+
+```text
+aa, bb, cc, dd, ee, ff, gg, hh, ii, jj
+```
+
+The adversarial test produced a maximum chain of 10, 15 empty buckets, and a
+standard deviation of 2.421. It was substantially worse than the random-key
+test's maximum chain of 3. The reported collision rate was only 0.062 because
+that metric counts the fraction of *buckets* with multiple keys; max-chain
+length and standard deviation reveal the actual severity more clearly here.
+
+## Improved Function Comparison
+
+The improved function uses 64-bit FNV-1a mixing and then applies an avalanche
+finalizer before reducing the result to the requested bucket range. This does
+not make the function cryptographically secure, but it prevents the simple
+base-31 alternating-difference pattern from controlling the low four bits.
+
+On the same ten adversarial keys, the improved function reduced the maximum
+chain from 10 to 3 and standard deviation from 2.421 to 0.992. The longest
+chain is 70% shorter, so the improvement worked against the discovered attack.
+
+## Reflection
+
+When asked to break its own function, AI successfully identified the
+multiplier/modulus relationship and produced ten keys that all collided. It
+was able to describe the general risk in its initial weaknesses, but it did
+not expose the concrete repeated-character attack until explicitly challenged.
+This suggests AI can critique generated code, but the quality of that critique
+depends heavily on being asked targeted, adversarial questions.
+
+A determined attacker could study the improved function and search for a new
+collision family, so passing one adversarial test is not proof of production
+security. Custom deterministic hashes expose a stable target; Python instead
+uses randomized hash seeds so an attacker cannot reliably precompute one
+collision set that behaves identically across processes.
+
+Across the five labs, AI has been strongest as a structured design-comparison
+partner because explicit alternatives and requirements make its claims easy
+to interrogate. Using it to validate or attack its own output requires the
+most critical engineering judgment: it may repeat its earlier assumptions,
+miss a metric's limitation, or stop after finding one weakness without proving
+that the replacement is generally safe.
