@@ -59,8 +59,6 @@ class LinkedList:
         current = self.head
         while current.next is not None:
             if current.next.data == data:
-                if current.next is self.tail:
-                    self.tail = current
                 current.next = current.next.next
                 return True
             current = current.next
